@@ -66,14 +66,14 @@ def readAdc():
             break
 
     for _ in range(24):
-        hx711Clock.value(1)
+        hx711Clock.on()
         #utime.sleep_us(1) #遅延いれなくても10usほど
-        hx711Clock.value(0)
+        hx711Clock.off()
         adValue = adValue << 1
         adValue += hx711Data.value()
 
-    hx711Clock.value(1)
-    hx711Clock.value(0)
+    hx711Clock.on()
+    hx711Clock.off()
     if (adValue & 0x00800000) != 0:
         # マイナスの時の処理(24ビット数)
         adValue = (adValue ^ 0xfffffe) * -1
@@ -207,12 +207,13 @@ def tSecWait(t):
 nd = 0
 
 utime.sleep_ms(500)
-# ready LED on
-blueLed.on()
+
 
 while True:
     data = []
-
+    print()
+    # ready LED on
+    blueLed.on()
     #サーボ初期位置
     deg = servoDegtoHex(startDeg)
     servo1.duty_u16(deg)
@@ -225,7 +226,7 @@ while True:
             break
 
     # 測定開始
-    blueLed.value(0)
+    blueLed.off()
     zeroOffset = tareZero()  # 毎回ゼロ合わせ
     utime.sleep_ms(300)
 
@@ -233,7 +234,7 @@ while True:
     while deg < endDeg:
         #for deg in range(startDeg, endDeg+incDeg, incDeg):
         posMm = stepbyDeg * (deg - startDeg)
-        print(f"{deg:7.2f} deg   ", end = "")  # debug
+        #print(f"{deg:7.2f} deg   ", end = "")  # debug
         print(f"{posMm:6.2f} mm  ", end = "")
         du_16 = servoDegtoHex(deg)
         servo1.duty_u16(du_16)
@@ -265,8 +266,6 @@ while True:
         blueLed.off()
         if tSecWait(1) == 1:
             break
-    print()
-    blueLed.on()
 
     if nd >= 99:
         break
