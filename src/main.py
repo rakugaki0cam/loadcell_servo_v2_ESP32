@@ -113,38 +113,31 @@ servo1 = PWM(Pin(13), freq=50)  # PWM freq 1~1000Hz
 # global
 armR = 8.5      # サーボホーンの腕の長さ[mm]
 startDeg = -24	# 初期角度[°]
-endDeg = 28	    # 終角度[°]
-incDeg = 2      # 角度増分[°]
+endDeg = 26	    # 終角度[°]
+incDeg = 0.7     # 角度増分[°]
 degOffset = 6   # サーボ中立電圧位置でのズレ[°]
 stepbyDeg = armR * math.sin(math.radians(1))    # mm/deg
 
 def servoMoveDeg(deg1):
-    
     servo1.duty(servoDegtoHex(deg1))
 
 def servoDegtoHex(setDeg):
-    if (setDeg < (startDeg-0.09)) or (setDeg > (endDeg+0.09)):
+    if (setDeg < (startDeg-1)) or (setDeg > (endDeg+1)):
         # 可動範囲外の時リターン
         print("errorroror")
-        return -9.9, -9.9
-    v0 = 74         # 1.45msec = 7.25%
-    vn90 = 120      # 2.4msec = 12.0%
-    vp90 = 30       # 0.5msec = 2.5%
-
+        return -9.9
     v0_u16 = 74*64        # 1.45msec = 7.25%
     vn90_u16 = 120*64      # 2.4msec = 12.0%
     vp90_u16 = 30*64       # 0.5msec = 2.5%
 
     degP = setDeg + degOffset                   # サーボへの指令角度
-    value = -degP * (vn90 - vp90) / 180 + v0    # 2度ごとにしか設定できない
-
     value_u16 = -degP * (vn90_u16 - vp90_u16) / 180 + v0_u16
     #print(value_u16, end=' ')  # debug
-    return int(value), int(value_u16)
+    return int(value_u16)
 
 
 def pwmDuty(percent):
-    value = 1024 * percent / 100  # duty 0~1024
+    value = 65536 * percent / 100  # duty 0~65535  : 20msec/65536=0.305usec : servo dead time 1usec=>3.3
     return int(value)
 
 def servoPos():
@@ -153,21 +146,21 @@ def servoPos():
 
     while True:
         print('zero position')
-        servo1.duty(servoDegtoHex(0))           # サーボ　ゼロ位置
+        servo1.duty_u16(servoDegtoHex(0))           # サーボ　ゼロ位置
         utime.sleep(1)
         while True:
             if tSecWait(1) == 1:
                 break
 
         print('start position')
-        servo1.duty(servoDegtoHex(startDeg))    # サーボ　スタート位置
+        servo1.duty_u16(servoDegtoHex(startDeg))    # サーボ　スタート位置
         utime.sleep(1)
         while True:
             if tSecWait(1) == 1:
                 break
 
         print('end position')
-        servo1.duty(servoDegtoHex(endDeg))      # サーボ　エンド位置
+        servo1.duty_u16(servoDegtoHex(endDeg))      # サーボ　エンド位置
         utime.sleep(1)
         while True:
             if tSecWait(1) == 1:
@@ -178,25 +171,19 @@ def servoMove():
     print('SERVO TEST   push button to 1step rotate')
     posDeg = 0.0  # スタート角度
     degInc = 0.5  # 変化分
-    du_u16 = 0
+    d = 0
     while True:
-        #print(posDeg, end = " ")
-        _, du_u16 = servoDegtoHex(posDeg)     #エラーの時-9.9で帰るのでtypeErrorで止まる
-        #servo1.duty(du)      # サーボ　ゼロ位置
-        #print(du_u16, end = " ")
-        servo1.duty_u16(du_u16)
-        #print(f"{posDeg:3d}deg   duty={(du/10.24):5.1f}%  ({du:4d}/1024)")     #ESP8266
-        print(f"{posDeg:5.1f}deg   duty={(du_u16/655.36):5.2f}%  ({du_u16:4d}/65536)")
-        utime.sleep_ms(2)
+        d = servoDegtoHex(posDeg)     #エラーの時-9.9で帰るのでtypeErrorで止まる
+        servo1.duty_u16(d)
+        print(f"{posDeg:5.1f}deg   duty={(d/655.36):5.2f}%  ({d:4d}/65536)")
+        utime.sleep_ms(150)
 
         while True:
             if sw1.value() == 0:
                 break
         posDeg += degInc
-        if posDeg >= endDeg:
-            degInc = -0.5
-        if posDeg <= startDeg:
-            degInc = 0.5
+        if (posDeg >= endDeg) or (posDeg <= startDeg):
+            degInc = -degInc
 
 
 # *** 入力等 サブ **************************************************
@@ -210,10 +197,10 @@ def tSecWait(t):
 
 
 # *** test ****************************************************
-# ZeroOffset = tare()    # 秤のゼロ合わせ
-# testLoadcell()         # loadcell 連続表示テスト
-# servoPos()             # サーボの位置
-# servoMove()            # サーボを動かしてみる
+#ZeroOffset = tare()    # 秤のゼロ合わせ
+#testLoadcell()         # loadcell 連続表示テスト
+#servoPos()             # サーボの位置
+#servoMove()            # サーボを動かしてみる
 
 
 # ***  MAIN ***************************************************
@@ -227,8 +214,8 @@ while True:
     data = []
 
     #サーボ初期位置
-    d, _ = servoDegtoHex(startDeg)
-    servo1.duty(d)
+    deg = servoDegtoHex(startDeg)
+    servo1.duty_u16(deg)
     utime.sleep_ms(1000)
     # ここで重量表示できると良いかも
 
@@ -242,21 +229,23 @@ while True:
     zeroOffset = tareZero()  # 毎回ゼロ合わせ
     utime.sleep_ms(300)
 
-    for deg in range(startDeg, endDeg+incDeg, incDeg):
+    deg = startDeg
+    while deg < endDeg:
+        #for deg in range(startDeg, endDeg+incDeg, incDeg):
         posMm = stepbyDeg * (deg - startDeg)
-        # print(f"{deg:3d} deg   ", end = "")  # debug
-        print(f"{posMm:5.1f} mm  ", end = "")
-        d, _ = servoDegtoHex(deg)
-        servo1.duty(d)
-        utime.sleep_ms(5)           # サーボのタイムラグ 0.1sec/60° = 3.3msec＠4.8V
-        utime.sleep_ms(100)         # 動かした後 落ち着かせる場合
-        adV = averageData(3, 1)     # 測定周期 10Hz
+        print(f"{deg:7.2f} deg   ", end = "")  # debug
+        print(f"{posMm:6.2f} mm  ", end = "")
+        du_16 = servoDegtoHex(deg)
+        servo1.duty_u16(du_16)
+        #utime.sleep_ms(50)           # サーボのタイムラグ 0.1sec/60° = 1.1msec/0.67deg＠4.8V
+        adV = averageData(1, 1)     # 測定周期 10Hz
         weight = digiVtoWeight(adV, zeroOffset)
         print(f" {weight:6.1f} gf")
         data.append([nd, deg, posMm, weight])
+        deg += incDeg
 
     nd += 1
-    csv = 0
+    csv = 0     #表計算用コピペ測定値出力のとき=1にする
     if csv:
         # csv data print
         print('push button to print csv data')
