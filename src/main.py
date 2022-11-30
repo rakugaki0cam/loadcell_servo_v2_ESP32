@@ -43,7 +43,7 @@ V_out = 0.000728        # センサ出力電圧 [V/V] @maxLoad 0.65~0.95mV
 maxLoad = 500.0         # センサ定格 [g]
 R1 = 12000              # R1抵抗値 [Ω] 3.3V版に改造
 R2 = 8200               # R2抵抗値 [Ω]
-Vbg = 1.25              # アナログリファレンス電圧 [V]
+Vbg = 0.5             # アナログリファレンス電圧 [V]
 aVdd = Vbg * (R1+R2)/R2 # アナログ電圧フルスケールAVdd [V]
 ADC1bit = aVdd / 2**24  # フルスケールを24bitで割る [V]
 ADCGain = 128           # A/Dゲイン
@@ -63,7 +63,9 @@ def readAdc():
     while True:
         # ADc wait
         if hx711Data.value() == 0:
-            break
+            utime.sleep_us(100)      #78usほどの変なパルスがあるらしいので除去
+            if hx711Data.value() == 0:
+                break
 
     for _ in range(24):
         hx711Clock.on()
@@ -114,7 +116,7 @@ servo1 = PWM(Pin(13), freq=50)  # PWM freq 1~1000Hz
 armR = 8.5      # サーボホーンの腕の長さ[mm]
 startDeg = -24	# 初期角度[°]
 endDeg = 26	    # 終角度[°]
-incDeg = 0.7     # 角度増分[°]
+incDeg = 1.5     # 角度増分[°]
 degOffset = 6   # サーボ中立電圧位置でのズレ[°]
 stepbyDeg = armR * math.sin(math.radians(1))    # mm/deg
 
@@ -137,7 +139,7 @@ def servoDegtoHex(setDeg):
 
 
 def pwmDuty(percent):
-    value = 65536 * percent / 100  # duty 0~65535  : 20msec/65536=0.305usec : servo dead time 1usec=>3.3
+    value = 65536 * percent / 100  # duty 0~65535  : 20msec/65536=0.305usec : servo dead utime 1usec=>3.3
     return int(value)
 
 def servoPos():
@@ -228,18 +230,24 @@ while True:
     # 測定開始
     blueLed.off()
     zeroOffset = tareZero()  # 毎回ゼロ合わせ
-    utime.sleep_ms(300)
+    utime.sleep_ms(2)
 
     deg = startDeg
+    t0 = utime.ticks_us()
+
     while deg < endDeg:
         #for deg in range(startDeg, endDeg+incDeg, incDeg):
+        t1 = utime.ticks_us()
+        print(f"{((t1 -t0)/1000):7.1f} msec   ", end = "")  # debug
         posMm = stepbyDeg * (deg - startDeg)
         #print(f"{deg:7.2f} deg   ", end = "")  # debug
         print(f"{posMm:6.2f} mm  ", end = "")
+        #print(f"{(incDeg * stepbyDeg / dt * 1000):7.1f} mm/sec   ", end = "")   #xxxxxxxxxxサーボの運動時間ではない
         du_16 = servoDegtoHex(deg)
         servo1.duty_u16(du_16)
-        #utime.sleep_ms(50)           # サーボのタイムラグ 0.1sec/60° = 1.1msec/0.67deg＠4.8V
-        adV = averageData(1, 1)     # 測定周期 10Hz
+        utime.sleep_ms(int(stepbyDeg*2))           # サーボのタイムラグ 0.1sec/60° = 1.1msec/0.67deg＠4.8V
+        utime.sleep_ms(200)                 #手動棒に近い値にしたい時
+        adV = averageData(8, 1)     # 測定周期 80Hz(実測10.6msecくらい)
         weight = digiVtoWeight(adV, zeroOffset)
         print(f" {weight:6.1f} gf")
         data.append([nd, deg, posMm, weight])
