@@ -11,6 +11,7 @@ import utime
 from machine import Pin, PWM
 
 print("***** Load cell & servo test ***************************")
+print()
 
 # *** switch & LED ********************************************
 sw1 = Pin(5, mode = Pin.IN, pull = Pin.PULL_UP)
@@ -39,16 +40,26 @@ utime.sleep_ms(1)
 hx711Clock.off()
 utime.sleep_ms(1)
 
-V_out = 0.000728        # センサ出力電圧 [V/V] @maxLoad 0.65~0.95mV
-maxLoad = 500.0         # センサ定格 [g]
-R1 = 12000              # R1抵抗値 [Ω] 3.3V版に改造
-R2 = 8200               # R2抵抗値 [Ω]
-Vbg = 0.5             # アナログリファレンス電圧 [V]
-aVdd = Vbg * (R1+R2)/R2 # アナログ電圧フルスケールAVdd [V]
-ADC1bit = aVdd / 2**24  # フルスケールを24bitで割る [V]
-ADCGain = 128           # A/Dゲイン
-Scale = V_out * aVdd / maxLoad  # ロードセル特性　[V/gf]
-k = ADC1bit / (Scale * ADCGain) #計算の係数
+V_out = 0.000728            # センサ出力電圧@maxLoad [V/V]  spec:0.65~0.95mV 校正対象
+maxLoad = 500.0             # センサ定格 [g]
+#ADConverter config
+ADCGain = 128               # A/Dゲイン
+R1 = 12000                 # R1抵抗値 [Ω] 3.3V版に改造
+R2 = 8200                  # R2抵抗値 [Ω]
+Vbg = 1.25                 # アナログリファレンス電圧 [V]
+aVdd = Vbg * (R1+R2)/R2    # アナログ電圧フルスケールAVDD [V]
+ADC1bit = aVdd / 2**24     # フルスケールを24bitで割る [V]
+Scale = V_out / maxLoad * aVdd  # ロードセル特性　[V/gf]
+k1 = ADC1bit / (Scale * ADCGain) #計算の係数
+#
+k = maxLoad / (V_out * 2**24 * ADCGain) #式を整理 gf/data1bit
+
+print('# loadcell')
+print(f'loadcell:         {maxLoad:4.0f} gf (MAX)')
+print(f'AVDD:            {aVdd:5.3f} V')
+print(f'sensorV:       {(V_out*1000):7.3f} V/V @Max load')
+print(f'k:          {k*1000:10.4f} mgf/bit (+-23bit)')
+
 
 # analog value
 def digiVtoWeight(adcV, zeroV):
@@ -116,9 +127,12 @@ servo1 = PWM(Pin(13), freq=50)  # PWM freq 1~1000Hz
 armR = 8.5      # サーボホーンの腕の長さ[mm]
 startDeg = -24	# 初期角度[°]
 endDeg = 26	    # 終角度[°]
-incDeg = 1.5     # 角度増分[°]
+incDeg = 1.0    # 角度増分[°]
 degOffset = 6   # サーボ中立電圧位置でのズレ[°]
 stepbyDeg = armR * math.sin(math.radians(1))    # mm/deg
+print('# servo')
+print(f'Degree step:     {incDeg:5.2f} deg')
+print(f'1step:           {stepbyDeg*incDeg:5.3f} mm')
 
 def servoMoveDeg(deg1):
     servo1.duty(servoDegtoHex(deg1))
@@ -188,7 +202,7 @@ def servoMove():
             degInc = -degInc
 
 
-# *** 入力等 サブ **************************************************
+# *** 入力 セーブ等 サブ **************************************************
 def tSecWait(t):
     #t秒のボタン入力待ち
     for _ in range(t * 10):
@@ -197,16 +211,38 @@ def tSecWait(t):
             return 1
     return 0
 
+def dataSave(da):
+    # データを保存
+
+    f = open('denkitamabou.txt', 'a')
+    for d in da:
+        f.write(f"No.{d[0]:3d}   {d[1]:3.0f} deg   {d[2]:5.1f} mm   {d[3]:8.2f} gf \n")
+    f.close()
+
 
 # *** test ****************************************************
 #ZeroOffset = tare()    # 秤のゼロ合わせ
 #testLoadcell()         # loadcell 連続表示テスト
 #servoPos()             # サーボの位置
 #servoMove()            # サーボを動かしてみる
-
+#data = [[1, 1.0, 1.0, 1.0],[2, 1.2, 2.0, 2.5]]
+#ataSave(data)              #データ保存
 
 # ***  MAIN ***************************************************
-nd = 0
+numMeas = 0
+waitFor = 240   # msec @wait for stop BB
+numAve = 5      # average　sample number
+servoDelay = 20 # servo PWM 50Hz
+timeAdc = 10.6 * (numAve - 1)   # ADコンバータタイム
+
+print('# timing')
+print(f'wait for stop:     {waitFor:3d} msec @1step')
+print(f'servo delay:       {servoDelay:3d} msec')
+print(f'average num:        {numAve:2d} times')
+print(f'ADC time:        {timeAdc:5.1f} msec')
+print(f'1step time:      {((waitFor+servoDelay+timeAdc)/1000):5.3f} sec')
+
+csv = 1         # 表計算用コピペ測定値出力のとき=1にする
 
 utime.sleep_ms(500)
 
@@ -235,35 +271,40 @@ while True:
     deg = startDeg
     t0 = utime.ticks_us()
 
+    print('time[sec]  x_pos[mm]         force[gf]')
     while deg < endDeg:
-        #for deg in range(startDeg, endDeg+incDeg, incDeg):
         t1 = utime.ticks_us()
-        print(f"{((t1 -t0)/1000):7.1f} msec   ", end = "")  # debug
+        print(f" {((t1 -t0)/1000000):7.2f}     ", end = "") # time
+
         posMm = stepbyDeg * (deg - startDeg)
-        #print(f"{deg:7.2f} deg   ", end = "")  # debug
-        print(f"{posMm:6.2f} mm  ", end = "")
-        #print(f"{(incDeg * stepbyDeg / dt * 1000):7.1f} mm/sec   ", end = "")   #xxxxxxxxxxサーボの運動時間ではない
         du_16 = servoDegtoHex(deg)
         servo1.duty_u16(du_16)
-        utime.sleep_ms(int(stepbyDeg*2))           # サーボのタイムラグ 0.1sec/60° = 1.1msec/0.67deg＠4.8V
-        utime.sleep_ms(200)                 #手動棒に近い値にしたい時
-        adV = averageData(8, 1)     # 測定周期 80Hz(実測10.6msecくらい)
+        #print(f"{deg:7.2f} deg   ", end = "")  # degree
+        print(f"{posMm:6.2f}    ", end = "")    # position x
+
+        utime.sleep_ms(20)        # サーボのタイムラグ PWM信号を受けるまでの時間と回す時間
+        utime.sleep_ms(waitFor)
+
+        adV = averageData(numAve, 1)            # 測定周期 80Hz(実測10.6msecくらい)
         weight = digiVtoWeight(adV, zeroOffset)
-        print(f" {weight:6.1f} gf")
-        data.append([nd, deg, posMm, weight])
+
+        print(f"   {weight:6.1f}")      # weight
+
+        data.append([numMeas, deg, posMm, weight])
         deg += incDeg
 
-    nd += 1
-    csv = 0     #表計算用コピペ測定値出力のとき=1にする
+    numMeas += 1
     if csv:
         # csv data print
         print('push button to print csv data')
         while True:
             if tSecWait(1) == 1:
                 break
-        print(f'data No.{nd:3d}')
+        print(f'data No.{numMeas:3d}')
         for _, _, _, w in data:
             print(f'{w:6.1f}')
+
+    # dataSave(data)
 
     # next
     print('push button to next')
@@ -275,13 +316,8 @@ while True:
         if tSecWait(1) == 1:
             break
 
-    if nd >= 99:
+    if numMeas >= 99:
         break
-
-
-# 保存データを見る
-for nd, deg, posMm, weight in data:
-    print(f"{nd:3d}   {deg:3d} deg   {posMm:5.1f} mm   {weight:8.2f} gf")
 
 
 
