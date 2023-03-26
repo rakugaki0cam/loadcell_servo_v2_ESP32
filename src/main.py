@@ -4,17 +4,23 @@
 # ESP32
 #
 # 2022.11.27
+# 2023.01.05 SDcard 追加
+# 2023.03.25 SDcardなし　基板制作（一部ピン変更）
+# 2023.03.26 やっぱりSDcard あり
+#
 #
 
 import math
+import uos
 import utime
-from machine import Pin, PWM
+from machine import Pin, PWM, SDCard
 
+print()
 print("***** Load cell & servo test ***************************")
 print()
 
 # *** switch & LED ********************************************
-sw1 = Pin(5, mode = Pin.IN, pull = Pin.PULL_UP)
+sw1 = Pin(13, mode = Pin.IN, pull = Pin.PULL_UP)
 blueLed = Pin(2, Pin.OUT)
 # Power on LED
 blueLed.on()
@@ -29,6 +35,25 @@ blueLed.on()
 utime.sleep_ms(100)
 blueLed.off()
 
+
+# *** SD card *************************************************
+cd = Pin(22, mode = Pin.IN, pull = Pin.PULL_UP)    #SDカードが入っていないとエラーで止まるのでcdピン追加
+sd = SDCard(slot=2, width=1, sck=Pin(18), mosi=Pin(23), miso=Pin(19), cs=Pin(5))
+#Hard ResetしてESP32内のプログラムを実行ではOKだけど、VScodeからのrunだとエラーになって止まる???　OSError: (-259, 'ESP_ERR_INVALID_STATE')
+if (cd.value() == 0):
+    detectSd = 1
+    uos.mount(sd, '/sd')
+    #print(uos.listdir('/sd'))
+    fileName = '/sd/tamabo.txt'
+    f = open(fileName, 'w')
+    f.write(f"*** DENKI TAMABOU **************\n")
+    f.write(f"\n")
+    f.close()
+    print('SD card mount OK')
+else:
+    print('!!!!!!!!!! NO SD card !!!!!!!!!!!!!!!!!!!!')
+    detectSd = 0
+        
 
 # *** loadcell init *******************************************
 # hx711 Loadcell ADconverter
@@ -60,6 +85,14 @@ print(f'AVDD:            {aVdd:5.3f} V')
 print(f'sensorV:       {(V_out*1000):7.3f} V/V @Max load')
 print(f'k:          {k*1000:10.4f} mgf/bit (+-23bit)')
 
+if(detectSd == 1):
+    f = open(fileName, 'a')
+    f.write('# loadcell\n')
+    f.write(f'loadcell:         {maxLoad:4.0f} gf (MAX)\n')
+    f.write(f'AVDD:            {aVdd:5.3f} V\n')
+    f.write(f'sensorV:       {(V_out*1000):7.3f} V/V @Max load\n')
+    f.write(f'k:          {k*1000:10.4f} mgf/bit (+-23bit)\n')
+    f.close()
 
 # analog value
 def digiVtoWeight(adcV, zeroV):
@@ -121,7 +154,7 @@ def testLoadcell():
 
 
 # *** servo init **********************************************
-servo1 = PWM(Pin(13), freq=50)  # PWM freq 1~1000Hz
+servo1 = PWM(Pin(4), freq=50)  # PWM freq 1~1000Hz
 # servo 50Hz = 20msec
 # global
 armR = 8.5      # サーボホーンの腕の長さ[mm]
@@ -130,9 +163,17 @@ endDeg = 26	    # 終角度[°]
 incDeg = 1.0    # 角度増分[°]
 degOffset = 6   # サーボ中立電圧位置でのズレ[°]
 stepbyDeg = armR * math.sin(math.radians(1))    # mm/deg
+startPos = armR * math.sin(math.radians(startDeg))  #mm
 print('# servo')
 print(f'Degree step:     {incDeg:5.2f} deg')
 print(f'1step:           {stepbyDeg*incDeg:5.3f} mm')
+
+if(detectSd == 1):
+    f = open(fileName, 'a')
+    f.write('# servo\n')
+    f.write(f'Degree step:     {incDeg:5.2f} deg\n')
+    f.write(f'1step:           {stepbyDeg*incDeg:5.3f} mm\n')
+    f.close()
 
 def servoMoveDeg(deg1):
     servo1.duty(servoDegtoHex(deg1))
@@ -150,6 +191,10 @@ def servoDegtoHex(setDeg):
     value_u16 = -degP * (vn90_u16 - vp90_u16) / 180 + v0_u16
     #print(value_u16, end=' ')  # debug
     return int(value_u16)
+
+def servoPosMn(deg1):
+    Pos = armR * math.sin(math.radians(deg1))  #mm
+    return Pos - startPos
 
 
 def pwmDuty(percent):
@@ -211,12 +256,19 @@ def tSecWait(t):
             return 1
     return 0
 
+
 def dataSave(da):
     # データを保存
-
-    f = open('denkitamabou.txt', 'a')
+    if(detectSd == 0):
+        print('!!! No SD card !!! can not data save.')
+        return
+    
+    f = open(fileName, 'a')
+    #f = open('denkitamabou.txt', 'a') #ESPフラッシュへ書込
+    f.write(f"No., time[sec], arm[deg], x_pos[mm], force[gf]\n")
     for d in da:
-        f.write(f"No.{d[0]:3d}   {d[1]:3.0f} deg   {d[2]:5.1f} mm   {d[3]:8.2f} gf \n")
+        f.write(f"{d[0]:3d},   {d[1]:7.3f},   {d[2]:6.2f},   {d[3]:7.3f},  {d[4]:8.2f}\n")
+    f.write(f"\n")
     f.close()
 
 
@@ -229,11 +281,11 @@ def dataSave(da):
 #ataSave(data)              #データ保存
 
 # ***  MAIN ***************************************************
-numMeas = 0
+numMeas = 1     # measurement number
 waitFor = 240   # msec @wait for stop BB
 numAve = 5      # average　sample number
 servoDelay = 20 # servo PWM 50Hz
-timeAdc = 10.6 * (numAve - 1)   # ADコンバータタイム
+timeAdc = 10.6 * (numAve - 1)   # ADconvert time
 
 print('# timing')
 print(f'wait for stop:     {waitFor:3d} msec @1step')
@@ -242,7 +294,16 @@ print(f'average num:        {numAve:2d} times')
 print(f'ADC time:        {timeAdc:5.1f} msec')
 print(f'1step time:      {((waitFor+servoDelay+timeAdc)/1000):5.3f} sec')
 
-csv = 1         # 表計算用コピペ測定値出力のとき=1にする
+if(detectSd == 1):
+    f = open(fileName, 'a')
+    f.write('# timing\n')
+    f.write(f'wait for stop:     {waitFor:3d} msec @1step\n')
+    f.write(f'servo delay:       {servoDelay:3d} msec\n')
+    f.write(f'average num:        {numAve:2d} times\n')
+    f.write(f'ADC time:        {timeAdc:5.1f} msec\n')
+    f.write(f'1step time:      {((waitFor+servoDelay+timeAdc)/1000):5.3f} sec\n')
+    f.write(f"\n")
+    f.close()
 
 utime.sleep_ms(500)
 
@@ -271,12 +332,14 @@ while True:
     deg = startDeg
     t0 = utime.ticks_us()
 
+    print(f'#{numMeas:3d} ')
     print('time[sec]  x_pos[mm]         force[gf]')
     while deg < endDeg:
         t1 = utime.ticks_us()
-        print(f" {((t1 -t0)/1000000):7.2f}     ", end = "") # time
+        cyctime = (t1 -t0)/1000000
+        print(f" {cyctime:7.2f}     ", end = "") # time
 
-        posMm = stepbyDeg * (deg - startDeg)
+        posMm = servoPosMn(deg)
         du_16 = servoDegtoHex(deg)
         servo1.duty_u16(du_16)
         #print(f"{deg:7.2f} deg   ", end = "")  # degree
@@ -290,21 +353,11 @@ while True:
 
         print(f"   {weight:6.1f}")      # weight
 
-        data.append([numMeas, deg, posMm, weight])
+        data.append([numMeas, cyctime, deg, posMm, weight])
         deg += incDeg
 
     numMeas += 1
-    if csv:
-        # csv data print
-        print('push button to print csv data')
-        while True:
-            if tSecWait(1) == 1:
-                break
-        print(f'data No.{numMeas:3d}')
-        for _, _, _, w in data:
-            print(f'{w:6.1f}')
-
-    # dataSave(data)
+    dataSave(data)
 
     # next
     print('push button to next')
@@ -316,7 +369,22 @@ while True:
         if tSecWait(1) == 1:
             break
 
+        if ((cd.value() == 0) and (detectSd == 0)):
+            detectSd = 1
+            uos.mount(sd, '/sd')
+            fileName = '/sd/tamabo.txt'
+            f = open(fileName, 'w')
+            f.write(f"*** DENKI TAMABOU **************\n")
+            f.write(f"\n")
+            f.close()
+            print('SD card mount OK')
+            print('push button to next')
+
+
     if numMeas >= 99:
+        print('too many data ---> restart')
+        if(detectSd == 1):
+            uos.umount('/sd')
         break
 
 
