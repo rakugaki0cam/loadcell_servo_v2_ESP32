@@ -1,13 +1,16 @@
+# 電気玉棒
+# 抜弾抵抗測定
+#
 # loadcell   HX711  500gf
 # servo motor SG92R
 #
 # ESP32
 #
 # 2022.11.27
-# 2023.01.05 SDcard 追加
-# 2023.03.25 SDcardなし　基板制作（一部ピン変更）
-# 2023.03.26 やっぱりSDcard あり
-#1
+# 2023.01.05          SDcard 追加
+# 2023.03.25          SDcardなし　基板制作（一部ピン変更）
+# 2023.03.26 ver.2.30 やっぱりSDcard あり
+#
 #
 
 import math
@@ -16,7 +19,7 @@ import utime
 from machine import Pin, PWM, SDCard
 
 print()
-print("***** Load cell & servo test ***************************")
+print("***** Denki Tamabo *************************")
 print()
 
 # *** switch & LED ********************************************
@@ -39,14 +42,14 @@ blueLed.off()
 # *** SD card *************************************************
 cd = Pin(22, mode = Pin.IN, pull = Pin.PULL_UP)    #SDカードが入っていないとエラーで止まるのでcdピン追加
 sd = SDCard(slot=2, width=1, sck=Pin(18), mosi=Pin(23), miso=Pin(19), cs=Pin(5))
-#Hard ResetしてESP32内のプログラムを実行ではOKだけど、VScodeからのrunだとエラーになって止まる???　OSError: (-259, 'ESP_ERR_INVALID_STATE')
+# Hard ResetしてESP32内のプログラムを実行ではOKだけど、VScodeからのrunだとエラーになって止まる???　OSError: (-259, 'ESP_ERR_INVALID_STATE')
 if (cd.value() == 0):
     detectSd = 1
     uos.mount(sd, '/sd')
     #print(uos.listdir('/sd'))
     fileName = '/sd/tamabo.txt'
     f = open(fileName, 'w')
-    f.write(f"*** DENKI TAMABOU **************\n")
+    f.write(f"*** DENKI TAMABO **************\n")
     f.write(f"\n")
     f.close()
     print('SD card mount OK')
