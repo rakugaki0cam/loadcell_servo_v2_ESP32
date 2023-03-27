@@ -10,16 +10,41 @@
 # 2023.01.05          SDcard 追加
 # 2023.03.25          SDcardなし　基板制作（一部ピン変更）
 # 2023.03.26 ver.2.30 やっぱりSDcard あり
+# 2023.03.27 ver.2.31 WiFiより時刻を取得->SDcardへの保存ファイルのタイムスタンプが入る
 #
 #
+
 
 import math
 import uos
+import ntptime
 import utime
-from machine import Pin, PWM, SDCard
+from machine import Pin, PWM, SDCard, RTC
+import wifiid
 
 print()
 print("***** Denki Tamabo *************************")
+
+## WiFi ###
+def wifiConnect():
+    import network
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    if not wlan.isconnected():
+        print('connecting to network...')
+        wlan.connect(wifiid.WIFI_SS_ID, wifiid.WIFI_PASSWORD)
+        while not wlan.isconnected():
+            pass
+    print('network config:', wlan.ifconfig())
+
+wifiConnect()    
+ntptime.settime()
+rtc = RTC()
+JST_OFFSET = 9 * 60 * 60
+(year, month, day, hour, min, sec, wd, yd) = utime.localtime(utime.time() + JST_OFFSET)
+rtc.datetime((year, month, day, wd, hour, min, sec, 0))
+#print('RTC:', rtc.datetime())
+print(f"{year:4d}-{month:02d}-{day:02d} {hour:02d}:{min:02d}:{sec:02d} (JST)")
 print()
 
 # *** switch & LED ********************************************
@@ -56,7 +81,9 @@ if (cd.value() == 0):
 else:
     print('!!!!!!!!!! NO SD card !!!!!!!!!!!!!!!!!!!!')
     detectSd = 0
-        
+
+print()        
+
 
 # *** loadcell init *******************************************
 # hx711 Loadcell ADconverter
@@ -275,13 +302,14 @@ def dataSave(da):
     f.close()
 
 
-# *** test ****************************************************
+# *** test test test ******************************************
 #ZeroOffset = tare()    # 秤のゼロ合わせ
 #testLoadcell()         # loadcell 連続表示テスト
 #servoPos()             # サーボの位置
 #servoMove()            # サーボを動かしてみる
 #data = [[1, 1.0, 1.0, 1.0],[2, 1.2, 2.0, 2.5]]
 #ataSave(data)              #データ保存
+
 
 # ***  MAIN ***************************************************
 numMeas = 1     # measurement number
