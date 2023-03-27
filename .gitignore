@@ -148,3 +148,4 @@ dmypy.json
 
 ### USER ###
 wifiid.py
+.DS_Store
