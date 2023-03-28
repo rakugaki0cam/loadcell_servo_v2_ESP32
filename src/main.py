@@ -11,6 +11,7 @@
 # 2023.03.25          SDcardなし　基板制作（一部ピン変更）
 # 2023.03.26 ver.2.30 やっぱりSDcard あり
 # 2023.03.27 ver.2.31 WiFiより時刻を取得->SDcardへの保存ファイルのタイムスタンプが入る
+# 2023.03.28 ver.2.32 ファイル名に日時を入れてユニークに
 #
 #
 
@@ -44,6 +45,7 @@ JST_OFFSET = 9 * 60 * 60
 (year, month, day, hour, min, sec, wd, yd) = utime.localtime(utime.time() + JST_OFFSET)
 rtc.datetime((year, month, day, wd, hour, min, sec, 0))
 #print('RTC:', rtc.datetime())
+txtTimeFileName = "{:4d}{:02d}{:02d}".format(year, month, day) + "-{:02d}{:02d}{:02d}".format(hour, min, sec)
 print(f"{year:4d}-{month:02d}-{day:02d} {hour:02d}:{min:02d}:{sec:02d} (JST)")
 print()
 
@@ -72,12 +74,14 @@ if (cd.value() == 0):
     detectSd = 1
     uos.mount(sd, '/sd')
     #print(uos.listdir('/sd'))
-    fileName = '/sd/tamabo.txt'
+    fileName = '/sd/tamabo' + txtTimeFileName + '.txt'
+    #print(fileName)
     f = open(fileName, 'w')
     f.write(f"*** DENKI TAMABO **************\n")
     f.write(f"\n")
     f.close()
     print('SD card mount OK')
+    print('filename: ' + fileName)
 else:
     print('!!!!!!!!!! NO SD card !!!!!!!!!!!!!!!!!!!!')
     detectSd = 0
