@@ -3,16 +3,37 @@
     "python.jediEnabled": false,
 
     // Loaded Stubs:  esp32-micropython-1.15.0 
-    "python.autoComplete.extraPaths": [".micropy/BradenM-micropy-stubs-ebac1d3/frozen", ".micropy/BradenM-micropy-stubs-4f5a52a/frozen", ".micropy/BradenM-micropy-stubs-ebac1d3/stubs", ".micropy/esp32test1"],
-    "python.autoComplete.typeshedPaths":  [".micropy/BradenM-micropy-stubs-ebac1d3/frozen", ".micropy/BradenM-micropy-stubs-4f5a52a/frozen", ".micropy/BradenM-micropy-stubs-ebac1d3/stubs", ".micropy/esp32test1"],
-    "python.analysis.typeshedPaths":  [".micropy/BradenM-micropy-stubs-ebac1d3/frozen", ".micropy/BradenM-micropy-stubs-4f5a52a/frozen", ".micropy/BradenM-micropy-stubs-ebac1d3/stubs", ".micropy/esp32test1"],
+    "python.autoComplete.extraPaths": [
+        ".micropy/BradenM-micropy-stubs-ebac1d3/frozen",
+        ".micropy/BradenM-micropy-stubs-4f5a52a/frozen", 
+        ".micropy/BradenM-micropy-stubs-ebac1d3/stubs", 
+        ".micropy/esp32test1"
+    ],
+    "python.autoComplete.typeshedPaths":  [
+        ".micropy/BradenM-micropy-stubs-ebac1d3/frozen", 
+        ".micropy/BradenM-micropy-stubs-4f5a52a/frozen", 
+        ".micropy/BradenM-micropy-stubs-ebac1d3/stubs", 
+        ".micropy/esp32test1"
+    ],
+    "python.analysis.typeshedPaths":  [
+        ".micropy/BradenM-micropy-stubs-ebac1d3/frozen", 
+        ".micropy/BradenM-micropy-stubs-4f5a52a/frozen", 
+        ".micropy/BradenM-micropy-stubs-ebac1d3/stubs", 
+        ".micropy/esp32test1",
+        ".venv/Lib/site-packages"
+    ],
 
     "python.linting.pylintEnabled": true,
-    "python.languageServer": "Default",     //追加
+    "python.languageServer": "Pylance",     //追加  "Default"?
+    //"python.analysis.typeCheckingMode": "basic",    //追加
     "python.analysis.extraPaths": [
         ".micropy/BradenM-micropy-stubs-ebac1d3/frozen",
         ".micropy/BradenM-micropy-stubs-4f5a52a/frozen",
         ".micropy/BradenM-micropy-stubs-ebac1d3/stubs",
         ".micropy/esp32test1"
-    ]
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none"
+    }
+    
 }

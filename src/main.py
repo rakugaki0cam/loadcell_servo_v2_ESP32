@@ -14,6 +14,8 @@
 # 2023.03.27 ver.2.31   Get Time from WiFi -> SDcard time stamp
 # 2023.03.28 ver.2.32   filename <- date&time add
 # 2023.03.29 ver.2.32b  delete Japanese Font ->  can not use in pymakr
+# 2023.04.01 ver.2.33   SD data .txt -> .csv
+# 2023.04.15 ver.2.34   measure x:7.05mm -> 7.72mm
 #
 #
 
@@ -24,6 +26,23 @@ import ntptime
 import utime
 from machine import Pin, PWM, SDCard, RTC
 import wifiid       # wifiid.py - WIFI_SS_ID, WIFI_PASSWORD
+
+# PIN init
+#servo
+servo1 = PWM(Pin(4), freq=50)   # PWM freq 1~1000Hz (50Hz = 20msec)
+servo1.duty_u16(74*64)          # Neutral Pos
+# hx711 Loadcell ADconverter
+hx711Clock = Pin(14, Pin.OUT)
+hx711Clock.off()
+hx711Data = Pin(27, mode=Pin.IN, pull=None)
+# sw & led
+sw1 = Pin(13, mode = Pin.IN, pull = Pin.PULL_UP)
+blueLed = Pin(2, Pin.OUT)
+blueLed.on()
+# SD card
+cd = Pin(22, mode = Pin.IN, pull = Pin.PULL_UP)    #Card Detect pin
+sd = SDCard(slot=2, width=1, sck=Pin(18), mosi=Pin(23), miso=Pin(19), cs=Pin(5))
+
 
 print()
 print("***** Denki Tamabo *************************")
@@ -40,7 +59,8 @@ def wifiConnect():
             pass
     print('network config:', wlan.ifconfig())
 
-wifiConnect()    
+wifiConnect()
+# time  
 ntptime.settime()
 rtc = RTC()
 JST_OFFSET = 9 * 60 * 60
@@ -52,8 +72,6 @@ print(f"{year:4d}-{month:02d}-{day:02d} {hour:02d}:{min:02d}:{sec:02d} (JST)")
 print()
 
 # *** switch & LED ********************************************
-sw1 = Pin(13, mode = Pin.IN, pull = Pin.PULL_UP)
-blueLed = Pin(2, Pin.OUT)
 # Power on LED
 blueLed.on()
 utime.sleep_ms(500)
@@ -69,20 +87,21 @@ blueLed.off()
 
 
 # *** SD card *************************************************
-cd = Pin(22, mode = Pin.IN, pull = Pin.PULL_UP)    #Card Detect pin add
-sd = SDCard(slot=2, width=1, sck=Pin(18), mosi=Pin(23), miso=Pin(19), cs=Pin(5))
-if (cd.value() == 0):
-    detectSd = 1
+def sdMount():
     uos.mount(sd, '/sd')
     #print(uos.listdir('/sd'))
-    fileName = '/sd/tamabo' + txtTimeFileName + '.txt'
     #print(fileName)
-    f = open(fileName, 'w')
-    f.write(f"*** DENKI TAMABO **************\n")
-    f.write(f"\n")
-    f.close()
+    sdf = open(fileName, 'w')
+    sdf.write(f"*** DENKI TAMABO **************\n")
+    sdf.write(f"\n")
+    sdf.close()
     print('SD card mount OK')
     print('filename: ' + fileName)
+
+fileName = '/sd/tamabo' + txtTimeFileName + '.csv'
+if (cd.value() == 0):
+    detectSd = 1
+    sdMount()
 else:
     print('!!!!!!!!!! NO SD card !!!!!!!!!!!!!!!!!!!!')
     detectSd = 0
@@ -91,9 +110,6 @@ print()
 
 
 # *** loadcell init *******************************************
-# hx711 Loadcell ADconverter
-hx711Clock = Pin(14, Pin.OUT)
-hx711Data = Pin(27, mode=Pin.IN, pull=None)     # ESP32
 # reset
 hx711Clock.on()
 utime.sleep_ms(1)
@@ -123,10 +139,10 @@ print(f'k:          {k*1000:10.4f} mgf/bit (+-23bit)')
 if(detectSd == 1):
     f = open(fileName, 'a')
     f.write('# loadcell\n')
-    f.write(f'loadcell:         {maxLoad:4.0f} gf (MAX)\n')
-    f.write(f'AVDD:            {aVdd:5.3f} V\n')
-    f.write(f'sensorV:       {(V_out*1000):7.3f} V/V @Max load\n')
-    f.write(f'k:          {k*1000:10.4f} mgf/bit (+-23bit)\n')
+    f.write(f'loadcell:,{maxLoad:4.0f},gf (MAX)\n')
+    f.write(f'AVDD:,{aVdd:5.3f},V\n')
+    f.write(f'sensorV:,{(V_out*1000):7.3f},V/V @Max load\n')
+    f.write(f'k:,{k*1000:10.4f},mgf/bit (+-23bit)\n')
     f.close()
 
 # analog value
@@ -173,7 +189,7 @@ def averageData(n, dotDisp):
     return ave
 
 def tareZero():
-    # 風袋
+    # zero set
     print('zero set ', end = '')
     dataZero = averageData(10, 1)
     print(' OK!')
@@ -181,7 +197,7 @@ def tareZero():
 
 #test
 def testLoadcell():
-    # loadcell continuous test
+    # TEST loadcell continuous read
     zeroV = tareZero()
     while True:
         wgf = digiVtoWeight(readAdc(), zeroV)
@@ -189,12 +205,10 @@ def testLoadcell():
 
 
 # *** servo init **********************************************
-servo1 = PWM(Pin(4), freq=50)  # PWM freq 1~1000Hz
-# servo 50Hz = 20msec
 # global
 armR = 8.5      # servo horn length[mm]
-startDeg = -24	# start angle[°]
-endDeg = 26	    # end angle[°]
+startDeg = -27	# start angle[°]
+endDeg = 28	    # end angle[°]
 incDeg = 1.0    # increment angle[°]
 degOffset = 6   # offset at neutral position[°]
 stepbyDeg = armR * math.sin(math.radians(1))    # mm/deg
@@ -206,8 +220,8 @@ print(f'1step:           {stepbyDeg*incDeg:5.3f} mm')
 if(detectSd == 1):
     f = open(fileName, 'a')
     f.write('# servo\n')
-    f.write(f'Degree step:     {incDeg:5.2f} deg\n')
-    f.write(f'1step:           {stepbyDeg*incDeg:5.3f} mm\n')
+    f.write(f'Degree step:,{incDeg:5.2f},deg\n')
+    f.write(f'1step:,{stepbyDeg*incDeg:5.3f},mm\n')
     f.close()
 
 def servoMoveDeg(deg1):
@@ -228,16 +242,22 @@ def servoDegtoHex(setDeg):
     return int(value_u16)
 
 def servoPosMn(deg1):
+    # Position X
     Pos = armR * math.sin(math.radians(deg1))  #mm
     return Pos - startPos
-
 
 def pwmDuty(percent):
     value = 65536 * percent / 100  # duty 0~65535  : 20msec/65536=0.305usec : servo dead utime 1usec=>3.3
     return int(value)
 
+def retStartDeg():
+    for deg in range(endDeg, startDeg-1, -1):
+        servo1.duty_u16(servoDegtoHex(deg))
+        utime.sleep_ms(10)
+
+# --- test -----
 def servoPos():
-    # サーボの位置確認
+    # TEST Servo Position
     print('SERVO TEST   position check  push button to next position')
 
     while True:
@@ -263,7 +283,7 @@ def servoPos():
                 break
 
 def servoMove():
-    # servo move test
+    # TEST servo move
     print('SERVO TEST   push button to 1step rotate')
     posDeg = 0.0  # start angle
     degInc = 0.5  # increment step
@@ -284,7 +304,7 @@ def servoMove():
 
 # *** Input , Data Save subroutine **************************************************
 def tSecWait(t):
-    #t秒のボタン入力待ち
+    # wait to push button (~ t sec)
     for _ in range(t * 10):
         utime.sleep_ms(100)
         if sw1.value() == 0:
@@ -298,12 +318,117 @@ def dataSave(da):
         print('!!! No SD card !!! can not data save.')
         return
     
-    f = open(fileName, 'a')
-    f.write(f"No., time[sec], arm[deg], x_pos[mm], force[gf]\n")
+    sdf = open(fileName, 'a')
+    sdf.write(f"No.,time[sec] ,arm[deg] ,x_pos[mm] ,force[gf]\n")
     for d in da:
-        f.write(f"{d[0]:3d},   {d[1]:7.3f},   {d[2]:6.2f},   {d[3]:7.3f},  {d[4]:8.2f}\n")
-    f.write(f"\n")
-    f.close()
+        sdf.write(f"{d[0]:3d},   {d[1]:7.3f},   {d[2]:6.2f},   {d[3]:7.3f},  {d[4]:8.2f}\n")
+    sdf.write(f"\n")
+    sdf.close()
+
+
+# *** Measure *************************************************************************
+def measureOnce():
+    global data
+    global ave
+
+    utime.sleep_ms(1000)
+    zeroOffset = tareZero()  # set zero every time
+    utime.sleep_ms(2)
+
+    deg = startDeg
+    t0 = utime.ticks_us()
+    i = 0
+    xx = []
+    ff = []
+
+    retStartDeg()
+    utime.sleep_ms(200)
+    
+    print('time[sec]  x_pos[mm]         force[gf]')
+    while deg < endDeg:
+        t1 = utime.ticks_us()
+        cyctime = (t1 -t0)/1000000
+        print(f" {cyctime:7.2f}     ", end = "") # time
+
+        posMm = servoPosMn(deg)
+        servo1.duty_u16(servoDegtoHex(deg))
+        #print(f"{deg:7.2f} deg   ", end = "")  # degree
+        print(f"{posMm:6.2f}    ", end = "")    # position x
+
+        utime.sleep_ms(20)        # servo time lag (receive PWM signal & moving)
+        utime.sleep_ms(waitFor)
+
+        adV = averageData(numAve, 1)            # measurement cycle 80Hz　(Actual measurement　10.6msec)
+        weight = digiVtoWeight(adV, zeroOffset)
+
+        print(f"   {weight:6.1f}")      # weight
+
+        data.append([numMeas, cyctime, deg, posMm, weight])
+        xx.append(posMm)
+        ff.append(weight)
+
+        ave[i] += weight
+        deg += incDeg
+        i += 1
+    return xx, ff
+
+def warmUpMove():
+    print('warm up ', end="")
+    for i in range(6):
+        print(f"{i+1:1d}.", end="")
+        deg = startDeg
+        utime.sleep_ms(300)
+
+        while deg < endDeg:
+            servo1.duty_u16(servoDegtoHex(deg))
+            utime.sleep_ms(50)        # servo time lag (receive PWM signal & moving)
+            deg += incDeg
+        utime.sleep_ms(300)
+        print(".", end="")
+        retStartDeg()
+        print(".", end="")
+
+    # 0 -> end pos
+    for deg in range(startDeg, endDeg):
+        servo1.duty_u16(servoDegtoHex(deg))
+        utime.sleep_ms(20)    
+    print()    
+
+
+def dataAveSave(xx, ff, sum):
+    # data average save -> SD card
+    global measN
+    print()
+    print(f"x_pos[mm],", end="")
+    for n in range(measN):
+        print(f" Fn{n+1:1d}[gf],", end="")
+    print(f"average[gf]")
+    
+    if(detectSd == 1):
+        #SDcard open
+        sdf = open(fileName, 'a')
+        sdf.write(f"x_pos[mm],")
+        for n in range(measN):
+            sdf.write(f"Fn{n+1:1d}[gf],")
+        sdf.write(f"average[gf]\n")
+
+    for i, x in enumerate(xx):
+        ave = sum[i] / measN
+        print(f"  {x:7.3f},", end="")
+        for n in range(measN):
+            print(f"{ff[n][i]:8.2f},", end="")
+        print(f"{ave:8.2f}")
+
+        if(detectSd == 1):
+            sdf.write(f"{x:7.3f},")
+            for n in range(measN):
+                sdf.write(f"{ff[n][i]:8.2f},")
+            sdf.write(f"{ave:8.2f}\n")
+ 
+    if(detectSd == 1):    
+        sdf.write(f"\n")
+        sdf.close()
+
 
 
 # *** test test test ******************************************
@@ -322,6 +447,7 @@ waitFor = 240   # msec @wait for stop BB
 numAve = 5      # average　sample number
 servoDelay = 20 # servo PWM 50Hz
 timeAdc = 10.6 * (numAve - 1)   # ADconvert time
+measN = 4        # repeat measure
 
 print('# timing')
 print(f'wait for stop:     {waitFor:3d} msec @1step')
@@ -333,70 +459,59 @@ print(f'1step time:      {((waitFor+servoDelay+timeAdc)/1000):5.3f} sec')
 if(detectSd == 1):
     f = open(fileName, 'a')
     f.write('# timing\n')
-    f.write(f'wait for stop:     {waitFor:3d} msec @1step\n')
-    f.write(f'servo delay:       {servoDelay:3d} msec\n')
-    f.write(f'average num:        {numAve:2d} times\n')
-    f.write(f'ADC time:        {timeAdc:5.1f} msec\n')
-    f.write(f'1step time:      {((waitFor+servoDelay+timeAdc)/1000):5.3f} sec\n')
+    f.write(f'wait for stop:,{waitFor:3d},msec @1step\n')
+    f.write(f'servo delay:,{servoDelay:3d},msec\n')
+    f.write(f'average num:,{numAve:2d},times\n')
+    f.write(f'ADC time:,{timeAdc:5.1f},msec\n')
+    f.write(f'1step time:,{((waitFor+servoDelay+timeAdc)/1000):5.3f},sec\n')
     f.write(f"\n")
     f.close()
 
+# 0 -> end pos
+for deg in range(0, endDeg):
+    servo1.duty_u16(servoDegtoHex(deg))
+    utime.sleep_ms(20)
 utime.sleep_ms(500)
 
 
+
 while True:
-    data = []
-    print()
+
+    # -> start pos
+    for deg in range(endDeg, startDeg, -1):
+        servo1.duty_u16(servoDegtoHex(deg))
+        utime.sleep_ms(20)
+
+    # ----> weight display , if possible 
     # ready LED on
     blueLed.on()
-    # servo start position
-    deg = servoDegtoHex(startDeg)
-    servo1.duty_u16(deg)
-    utime.sleep_ms(1000)
-    # ----> weight display , if possible 
-
+    print()
     print('push button to start measurement')
+    utime.sleep_ms(1000)
     while True:
         if sw1.value() == 0:
             break
 
-    # start measurement
-    blueLed.off()
-    zeroOffset = tareZero()  # set zero every time
-    utime.sleep_ms(2)
-
-    deg = startDeg
-    t0 = utime.ticks_us()
+    warmUpMove()    
 
     print(f'#{numMeas:3d} ')
-    print('time[sec]  x_pos[mm]         force[gf]')
-    while deg < endDeg:
-        t1 = utime.ticks_us()
-        cyctime = (t1 -t0)/1000000
-        print(f" {cyctime:7.2f}     ", end = "") # time
-
-        posMm = servoPosMn(deg)
-        du_16 = servoDegtoHex(deg)
-        servo1.duty_u16(du_16)
-        #print(f"{deg:7.2f} deg   ", end = "")  # degree
-        print(f"{posMm:6.2f}    ", end = "")    # position x
-
-        utime.sleep_ms(20)        # servo time lag (receive PWM signal & moving)
-        utime.sleep_ms(waitFor)
-
-        adV = averageData(numAve, 1)            # measurement cycle 80Hz　(Actual measurement　10.6msec)
-        weight = digiVtoWeight(adV, zeroOffset)
-
-        print(f"   {weight:6.1f}")      # weight
-
-        data.append([numMeas, cyctime, deg, posMm, weight])
-        deg += incDeg
-
-    numMeas += 1
-    dataSave(data)
+    # start measurement
+    blueLed.off()
+    ave = 60*[0]
+    x = []
+    f = []
+    for i in range(measN):
+        #measure  mesN times
+        data = []
+        utime.sleep_ms(200)
+        x, fi = measureOnce()
+        f.append(fi)
+        numMeas += 1
+        #dataSave(data)  
+    dataAveSave(x, f, ave)
 
     # next
-    print('push button to next')
+    print('push button to next (adjust another condition)')
     while True:
         blueLed.on()
         if tSecWait(1) == 1:
@@ -407,15 +522,7 @@ while True:
 
         if ((cd.value() == 0) and (detectSd == 0)):
             detectSd = 1
-            uos.mount(sd, '/sd')
-            fileName = '/sd/tamabo.txt'
-            f = open(fileName, 'w')
-            f.write(f"*** DENKI TAMABOU **************\n")
-            f.write(f"\n")
-            f.close()
-            print('SD card mount OK')
-            print('push button to next')
-
+            sdMount()
 
     if numMeas >= 99:
         print('too many data ---> restart')
