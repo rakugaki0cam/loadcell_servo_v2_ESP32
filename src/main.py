@@ -18,6 +18,7 @@
 # 2023.04.15 ver.2.34   measure x:7.05mm -> 7.72mm
 # 2023.04.24 ver.2.35   measure x:7.72mm -> 8.50mm
 # 2023.04.29 ver.2.40   Stack M5 CORE2へUART送信してグラフと荷重を表示
+# 2023.04.30 ver.2.41   サーボの角度をglobal化
 #
 #
 
@@ -49,16 +50,7 @@ uart1 = UART(1,baudrate = 115200, tx = 25, rx = 26)   # 25(white), 26(yellow) ->
 
 print()
 print("***** Denki Tamabo *************************")
-uart1.write("*** Denki Tamabo ***")
-
-# tx test ######################
-#while True:
-#    if uart1.any():
-#        #chr = uart1.readline()
-#        chr = uart1.read(10)
-#        print(chr)
-#        print(int(chr)+1)
-#    pass
+uart1.write("*** Denki Tamabo ***")     # -> stack M5
 
 ## WiFi ###
 def wifiConnect():
@@ -171,7 +163,7 @@ def readAdc():
     while True:
         # ADc wait
         if hx711Data.value() == 0:
-            utime.sleep_us(120)      # remove 78us pulse noise   100->120 2023.4.29
+            utime.sleep_us(90)      # remove 78us pulse noise   100->90 2023.4.30
             if hx711Data.value() == 0:
                 break
 
@@ -193,11 +185,18 @@ def readAdc():
 def averageData(n, dotDisp):
     # ret: ave - signed 23bit
     dataSum = 0
+    s = 0
     for _ in range(n):
-        dataSum += readAdc()
+        a = readAdc()
+        if a > -1:
+            dataSum += a
+            s += 1
         if dotDisp == 1:
             print('.', end = "")
-    ave = int(dataSum / n)
+    if s == 0:
+        ave = 0
+    else:
+        ave = int(dataSum / s)
     # print("average = 0x{:06x}".format(ave), end = '  ')  # debug
     return ave
 
@@ -226,6 +225,11 @@ INC_DEG = 2     # increment angle[°]
 DEG_OFFSET = 6  # offset at neutral position[°]
 STEP_BY_DEG = ARM_R * math.sin(math.radians(1))     # mm/deg
 START_POS = ARM_R * math.sin(math.radians(START_DEG))   #mm
+# servo speed
+DELAY_SLOW = 3500   #us
+DELAY_NORM = 500    #us
+servoPosDeg = 0    # servo positon[°]
+
 print('# servo')
 print(f'Degree step:     {INC_DEG:5.2f} deg')
 print(f'1step:           {STEP_BY_DEG*INC_DEG:5.3f} mm')
@@ -237,14 +241,45 @@ if(detectSd == 1):
     f.write(f'1step:,{STEP_BY_DEG*INC_DEG:5.3f},mm\n')
     f.close()
 
-def servoMoveDeg(deg1):
-    servo1.duty(servoDegtoHex(deg1))
+def servoMoveDeg(posDeg, speed):
+    # servo move
+    # deg1: position
+    # speed: fast, normal, slow
+    global servoPosDeg
+
+    se = servoDegtoHex(posDeg)
+    if se == -99.9:
+        return
+    
+    if speed is "fast":
+        servo1.duty_u16(se)
+        servoPosDeg = posDeg
+        return
+
+    sa = servoDegtoHex(servoPosDeg)
+    if sa > se:
+        inc = -1
+    else:
+        inc = 1
+    
+    if speed is "slow":
+        dt = DELAY_SLOW
+    elif speed is "normal":
+        dt = DELAY_NORM
+
+    #print(f"0x{sa:04x} -> 0x{se:04x} step{inc:2d}")
+    for h16 in range(sa, se, inc):
+        servo1.duty_u16(h16)            # !!!servo PWM 50Hz = 20msec
+        utime.sleep_us(dt)
+
+    servoPosDeg = posDeg ###GLOBAL
+
 
 def servoDegtoHex(setDeg):
     if (setDeg < (START_DEG-1)) or (setDeg > (END_DEG+1)):
         # out of range
         print("servo angle error!!!")
-        return -9.9
+        return -99.9
     v0_u16 = 74*64        # 1.45msec = 7.25%
     vn90_u16 = 120*64      # 2.4msec = 12.0%
     vp90_u16 = 30*64       # 0.5msec = 2.5%
@@ -255,12 +290,12 @@ def servoDegtoHex(setDeg):
     return int(value_u16)
 
 def servoPosMn(deg1):
-    # servo degree -> Position X
+    # servo degree -> Position X mm
     Pos = ARM_R * math.sin(math.radians(deg1))  #mm
     return Pos - START_POS
 
 def posXtoDeg(posX):
-    # Position X -> servo degree
+    # Position X mm -> servo degree
     x = posX + START_POS 
     deg =  math.degrees(math.asin(x / ARM_R))  #degree
     return deg
@@ -269,64 +304,6 @@ def pwmDuty(percent):
     value = 65536 * percent / 100  # duty 0~65535  : 20msec/65536=0.305usec : servo dead utime 1usec=>3.3
     return int(value)
 
-def retStartDeg():
-    sa = servoDegtoHex(END_DEG)
-    se = servoDegtoHex(START_DEG)
-    if sa > se:
-        inc = -1
-    else:
-        inc = 1
-    #print(sa,se,inc)
-    for hex in range(sa, se, inc):
-        servo1.duty_u16(hex)
-        utime.sleep_us(500)
-
-# --- test -----
-def servoPos():
-    # TEST Servo Position
-    print('SERVO TEST   position check  push button to next position')
-
-    while True:
-        print('zero position')
-        servo1.duty_u16(servoDegtoHex(0))           # servo neutral position
-        utime.sleep(1)
-        while True:
-            if tSecWait(1) == 1:
-                break
-
-        print('start position')
-        servo1.duty_u16(servoDegtoHex(START_DEG))    # servo start position
-        utime.sleep(1)
-        while True:
-            if tSecWait(1) == 1:
-                break
-
-        print('end position')
-        servo1.duty_u16(servoDegtoHex(END_DEG))      # servo end position
-        utime.sleep(1)
-        while True:
-            if tSecWait(1) == 1:
-                break
-
-def servoMove():
-    # TEST servo move
-    print('SERVO TEST   push button to 1step rotate')
-    posDeg = 0.0  # start angle
-    degInc = 0.5  # increment step
-    d = 0
-    while True:
-        d = servoDegtoHex(posDeg)     # return val = -9.9 in err, stop program by "typeError"
-        servo1.duty_u16(d)
-        print(f"{posDeg:5.1f}deg   duty={(d/655.36):5.2f}%  ({d:4d}/65536)")
-        utime.sleep_ms(150)
-
-        while True:
-            if sw1.value() == 0:
-                break
-        posDeg += degInc
-        if (posDeg >= END_DEG) or (posDeg <= START_DEG):
-            degInc = -degInc
-
 
 # *** Input , Data Save subroutine **************************************************
 def tSecWait(t):
@@ -334,25 +311,11 @@ def tSecWait(t):
     for _ in range(t * 10):
         utime.sleep_ms(100)
         if uart1.any():
-            if (uart1.read(3)).decode() is "BTZ":
+            if (uart1.read(3)).decode() is "BTZ":   # <- Stack M5
                 return 1
         if sw1.value() == 0:
             return 1
     return 0
-
-
-def dataSave(da):
-    # data save -> SD card
-    if(detectSd == 0):
-        print('!!! No SD card !!! can not data save.')
-        return
-    
-    sdf = open(fileName, 'a')
-    sdf.write(f"No.,time[sec] ,arm[deg] ,x_pos[mm] ,force[gf]\n")
-    for d in da:
-        sdf.write(f"{d[0]:3d},   {d[1]:7.3f},   {d[2]:6.2f},   {d[3]:7.3f},  {d[4]:8.2f}\n")
-    sdf.write(f"\n")
-    sdf.close()
 
 
 # *** Measure *************************************************************************
@@ -363,8 +326,7 @@ def measureOnce():
     utime.sleep_ms(200)
     zeroOffset = tareZero()  # set zero every time
     utime.sleep_ms(100)
-    
-    retStartDeg()
+    servoMoveDeg(START_DEG, "normal") # -> Start position
     utime.sleep_ms(700)
 
     deg = START_DEG
@@ -384,25 +346,24 @@ def measureOnce():
     while deg < END_DEG:
         t1 = utime.ticks_us()
         cyctime = (t1 -t0)/1000000
-        print(f" {cyctime:7.2f} sec    ", end = "") # time
+        print(f" {cyctime:7.2f} sec    ", end = "")
 
+        servoMoveDeg(deg, "slow")               # measure
+        print(f"{deg:7.2f} deg   ", end = "")
         posMm = servoPosMn(deg)
-        servo1.duty_u16(servoDegtoHex(deg))
-        print(f"{deg:7.2f} deg   ", end = "")  # degree ###############
-        print(f"{posMm:6.2f} mm    ", end = "")    # position x
-
-        utime.sleep_ms(20)        # servo time lag (receive PWM signal & moving)
+        print(f"{posMm:6.2f} mm    ", end = "")
+        utime.sleep_ms(SERVO_DELAY)             # servo time lag (receive PWM signal & moving)
         utime.sleep_ms(WAIT_FOR)
 
-        adV = averageData(NUM_AVE, 1)            # measurement cycle 80Hz　(Actual measurement　10.6msec)
+        adV = averageData(NUM_AVE, 1)           # measurement cycle 80Hz　(Actual measurement　10.6msec)
         weight = digiVtoWeight(adV, zeroOffset)
-        print(f"   {weight:6.1f} gf  ", end = "")      # weight
+        print(f"   {weight:6.1f} gf  ", end = "")
         #simple bar graph
         for _ in range(int(weight/10)):
             print("*", end = "")
-        print()    
-        uart1.write(f"PGZ {posMm:6.3f} {weight:6.1f}")    # graph data -> M5
+        print()
 
+        uart1.write(f"PGZ {posMm:6.3f} {weight:6.1f}")    # graph data -> stack M5
         data.append([numMeas, cyctime, deg, posMm, weight])
         xx.append(posMm)
         ff.append(weight)
@@ -412,30 +373,19 @@ def measureOnce():
         i += 1
     return xx, ff
 
+
 def warmUpMove():
     #pull fast, slow return 
     print('warm up ', end="")
     for i in range(6):
         print(f"{i+1:1d}.", end="")
-        deg = START_DEG
+        servoMoveDeg(END_DEG, "fast")   #pull 
         utime.sleep_ms(300)
-
-        while deg < END_DEG:
-            servo1.duty_u16(servoDegtoHex(deg))
-            deg += INC_DEG
-            utime.sleep_us(100)        # servo time lag (receive PWM signal & moving)
-
+        servoMoveDeg(START_DEG, "normal") #return
+        print(".", end="")
         utime.sleep_ms(700)
         print(".", end="")
-        retStartDeg()
-        print(".", end="")
-        utime.sleep_ms(100)
-
-    # 0 -> end pos
-    for deg in range(START_DEG, END_DEG):
-        servo1.duty_u16(servoDegtoHex(deg))
-        utime.sleep_ms(20)    
-    print()    
+    print("end")    
 
 
 def dataAveSave(xx, ff, sum):
@@ -482,24 +432,36 @@ def dataAveSave(xx, ff, sum):
     return max
 
 
+def dataSave(da):
+    # measured data save -> SD card
+    if(detectSd == 0):
+        print('!!! No SD card !!! can not data save.')
+        return
+    
+    sdf = open(fileName, 'a')
+    sdf.write(f"No.,time[sec] ,arm[deg] ,x_pos[mm] ,force[gf]\n")
+    for d in da:
+        sdf.write(f"{d[0]:3d},   {d[1]:7.3f},   {d[2]:6.2f},   {d[3]:7.3f},  {d[4]:8.2f}\n")
+    sdf.write(f"\n")
+    sdf.close()
+
+
 # *** test test test ******************************************
 #ZeroOffset = tare()    # Loadcell Zero set
 #testLoadcell()         # loadcell Continuous test
-#servoPos()             # servo position
-#servoMove()            # servo move test
 #
 #data = [[1, 1.0, 1.0, 1.0],[2, 1.2, 2.0, 2.5]]
 #dataSave(data)         #data save test
 
 
 # ***  MAIN ***************************************************
-numMeas = 1     # measurement number
-WAIT_FOR = 240  # msec @wait for stop BB
-NUM_AVE = 5     # average　sample number
-SERVO_DELAY = 20    # servo PWM 50Hz
-TIME_ADC = 10.6 * (NUM_AVE - 1)     # ADconvert time
 NUM_MEAS = 4        # repeat measure
-warmupFlag = True
+WAIT_FOR = 0      # msec @wait for stop BB '23/4/30 240->0 (servo slow 3500)
+SERVO_DELAY = 20    # servo PWM 50Hz 
+NUM_AVE = 5         # average　sample number 
+TIME_ADC = 10.6 * (NUM_AVE - 1)     # ADconvert time
+numMeas = 1         # measurement number
+warmupFlag = False
 
 print('# timing')
 print(f'wait for stop:     {WAIT_FOR:3d} msec @1step')
@@ -520,30 +482,21 @@ if(detectSd == 1):
     f.close()
 
 # 0 -> end pos
-for deg in range(0, END_DEG):
-    servo1.duty_u16(servoDegtoHex(deg))
-    utime.sleep_ms(20)
+servoMoveDeg(END_DEG, "normal")
 utime.sleep_ms(500)
 
-
-
 while True:
-
+    # main loop
     if warmupFlag is True:
         uart1.write("WUZ")      # warmup  -> M5
     else:
         uart1.write("WNZ")      # no warmup -> M5
 
-
-    # -> start pos
-    for deg in range(END_DEG, START_DEG, -1):
-        servo1.duty_u16(servoDegtoHex(deg))
-        utime.sleep_ms(20)
-    posDeg = START_DEG
-
+    
     # ready LED on
     blueLed.on()
     zeroOffset = tareZero()  # set zero
+    servoMoveDeg(START_DEG, "normal")   # -> start pos
 
     print()
     print('push button to start measurement')
@@ -577,9 +530,8 @@ while True:
                 posXmm = float(mes) / 10
                 #print(f" posX:{posXmm:6.2f}mm ", end="")
                 d = posXtoDeg(posXmm)
-                h = servoDegtoHex(d)     # return val = -9.9 in err, stop program by "typeError"
-                #print(f"ded:{d:6.2f}deg  hex:{h:04x}")
-                servo1.duty_u16(h)
+                #print(f"deg:{d:6.2f}deg")
+                servoMoveDeg(d, "normal")
         utime.sleep_ms(1)     # servo time lag (receive PWM signal & moving)
 
 
@@ -593,7 +545,7 @@ while True:
         uart1.write("Warm up ")
         warmUpMove()
     else:
-        retStartDeg()
+        servoMoveDeg(START_DEG, "normal")
         print('No warm up')
 
     print(f'#{numMeas:3d} ')
@@ -612,7 +564,7 @@ while True:
         numMeas += 1
         #dataSave(data)  
     fMax = dataAveSave(x, f, ave)
-    uart1.write(f"MAZ {fMax:4.0f}gf")      # MAX  -> M5
+    uart1.write(f"MAZ {fMax:4.0f}gf")      # MAX  -> stack M5
     print(f' Nukidan Max = {fMax:8.2f}gf ')
     print()
 
@@ -642,6 +594,8 @@ while True:
     # UART clear
     if uart1.any():
         dummy = uart1.read()
+
+    utime.sleep_ms(800)
 
 
 
