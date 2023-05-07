@@ -19,6 +19,7 @@
 # 2023.04.24 ver.2.35   measure x:7.72mm -> 8.50mm
 # 2023.04.29 ver.2.40   Stack M5 CORE2へUART送信してグラフと荷重を表示
 # 2023.04.30 ver.2.41   サーボの角度をglobal化
+# 2023.05.07 ver.2.50   サーボホーンの角度位置を45度変更し、行き過ぎを防ぐ。ピークホールド追加。M5初期化コマンド追加。
 #
 #
 
@@ -33,7 +34,7 @@ import wifiid       # wifiid.py - WIFI_SS_ID, WIFI_PASSWORD
 # PIN init
 #servo
 servo1 = PWM(Pin(4), freq=50)   # PWM freq 1~1000Hz (50Hz = 20msec)
-servo1.duty_u16(74*64)          # Neutral Pos
+servo1.duty_u16((120-74)*64)     # Neutral Pos = +45deg right half
 # hx711 Loadcell ADconverter
 hx711Clock = Pin(14, Pin.OUT)
 hx711Clock.off()
@@ -50,6 +51,8 @@ uart1 = UART(1,baudrate = 115200, tx = 25, rx = 26)   # 25(white), 26(yellow) ->
 
 print()
 print("***** Denki Tamabo *************************")
+uart1.write("INI")      # initialize -> M5
+utime.sleep_ms(500)
 uart1.write("*** Denki Tamabo ***")     # -> stack M5
 
 ## WiFi ###
@@ -219,16 +222,17 @@ def testLoadcell():
 # *** servo init **********************************************
 # global
 ARM_R = 8.5     # servo horn length[mm]
-START_DEG = -30	# start angle[°]
-END_DEG = 32	# end angle[°]
+START_DEG = -27	# start angle[°]
+END_DEG = 35	# end angle[°]
 INC_DEG = 2     # increment angle[°]
-DEG_OFFSET = 6  # offset at neutral position[°]
+DEG_OFFSET = 6 # offset at neutral position[°]
+DEG_HORN = 45    # servo horn neutral position[°]
 STEP_BY_DEG = ARM_R * math.sin(math.radians(1))     # mm/deg
 START_POS = ARM_R * math.sin(math.radians(START_DEG))   #mm
 # servo speed
 DELAY_SLOW = 3500   #us
 DELAY_NORM = 500    #us
-servoPosDeg = 0    # servo positon[°]
+servoPosDeg = DEG_OFFSET    # servo positon init[°]
 
 print('# servo')
 print(f'Degree step:     {INC_DEG:5.2f} deg')
@@ -280,12 +284,12 @@ def servoDegtoHex(setDeg):
         # out of range
         print("servo angle error!!!")
         return -99.9
-    v0_u16 = 74*64        # 1.45msec = 7.25%
-    vn90_u16 = 120*64      # 2.4msec = 12.0%
-    vp90_u16 = 30*64       # 0.5msec = 2.5%
+    vc0_u16 = 74*64          #  0deg 1.45msec = PWM duty  7.25% center
+    vp90_u16 = 120*64       # +90deg 2.4msec = PWM duty 12.0%  right
+    vn90_u16 = 30*64        # -90deg 0.5msec = PWM duty  2.5%  left
 
-    degP = setDeg + DEG_OFFSET                   # servo angle
-    value_u16 = -degP * (vn90_u16 - vp90_u16) / 180 + v0_u16
+    degP = setDeg + DEG_HORN - DEG_OFFSET   # servo angle
+    value_u16 = -degP * (vp90_u16 - vn90_u16) / 180 + vc0_u16   # 'minus' degP due to servo horn direction
     #print(value_u16, end=' ')  # debug
     return int(value_u16)
 
@@ -481,9 +485,16 @@ if(detectSd == 1):
     f.write(f"\n")
     f.close()
 
+# zero position test
+#servoMoveDeg(0, "normal")
+#print("zero position")
+#while True:
+#    pass
+
 # 0 -> end pos
 servoMoveDeg(END_DEG, "normal")
 utime.sleep_ms(500)
+
 
 while True:
     # main loop
@@ -506,12 +517,21 @@ while True:
 
     # weight display
     uart1.write("ULZ")      # unlock -> M5
+    wMax = 0
+    peakHoldCount = 0
+
     while True:
         if sw1.value() == 0:
             break
-        adV = averageData(10, 0)            # measurement cycle 80Hz　(Actual measurement　10.6msec)
+        adV = averageData(10, 0)    # measurement cycle 80Hz　(Actual measurement　10.6msec) x 10 -> 0.106sec
         weight = digiVtoWeight(adV, zeroOffset)
-        uart1.write(f"AAZ {weight:6.1f}")      # weight -> M5
+        # peak hold
+        if weight > wMax:
+            wMax = weight
+            peakHoldCount = 0      
+            uart1.write(f"WMX {wMax:6.1f}")     # peak  -> M5
+
+        uart1.write(f"AAZ {weight:6.1f}")       # weight -> M5
         #utime.sleep_ms(100)        # servo time lag (receive PWM signal & moving)
         if uart1.any():
             mesType = (uart1.read(3)).decode()
@@ -533,7 +553,11 @@ while True:
                 #print(f"deg:{d:6.2f}deg")
                 servoMoveDeg(d, "normal")
         utime.sleep_ms(1)     # servo time lag (receive PWM signal & moving)
-
+        peakHoldCount += 1
+        if peakHoldCount > 15:  # peak hold time = about 1.5sec
+            wMax = weight
+            peakHoldCount = 0
+            uart1.write(f"WMX {wMax:6.1f}")     # peak reset -> M5
 
     utime.sleep_ms(100)     # servo time lag (receive PWM signal & moving)
     uart1.write("CLR")      # graph clear -> M5
