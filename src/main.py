@@ -53,7 +53,7 @@ print()
 print("***** Denki Tamabo *************************")
 uart1.write("INI")      # initialize -> M5
 utime.sleep_ms(500)
-uart1.write("*** Denki Tamabo ***")     # -> stack M5
+uart1.write("**** Denki Tamabo ****")     # -> stack M5
 
 ## WiFi ###
 def wifiConnect():
@@ -338,7 +338,7 @@ def measureOnce():
     i = 0
     xx = []
     ff = []
-
+    wMax = 0
 ###
 #    print('push button to start')   #ノズルを落ち着かせたい時の特別シーケンス
 #    while True:
@@ -347,6 +347,8 @@ def measureOnce():
 ###   
 
     print('    time[sec]     angle[deg]   x_pos[mm]            force[gf]')
+    uart1.write(f"WMX    0.0")     # peak reset -> M5
+
     while deg < END_DEG:
         t1 = utime.ticks_us()
         cyctime = (t1 -t0)/1000000
@@ -362,6 +364,11 @@ def measureOnce():
         adV = averageData(NUM_AVE, 1)           # measurement cycle 80Hz　(Actual measurement　10.6msec)
         weight = digiVtoWeight(adV, zeroOffset)
         print(f"   {weight:6.1f} gf  ", end = "")
+        # peak hold
+        if weight > wMax:
+            wMax = weight
+            uart1.write(f"WMX {wMax:6.1f}")     # peak  -> M5
+
         #simple bar graph
         for _ in range(int(weight/10)):
             print("*", end = "")
@@ -494,6 +501,7 @@ if(detectSd == 1):
 # 0 -> end pos
 servoMoveDeg(END_DEG, "normal")
 utime.sleep_ms(500)
+uart1.write("IOK")      # init OK! -> M5
 
 
 while True:
@@ -511,7 +519,11 @@ while True:
 
     print()
     print('push button to start measurement')
-    uart1.write("push button to start")
+    if detectSd == 1:
+        uart1.write("push button to start")
+    else:
+        uart1.write("!!!! NO SDcard !!!!")
+    
     utime.sleep_ms(300)
 
 
@@ -544,6 +556,10 @@ while True:
             elif mesType is "WNZ":
                 warmupFlag = False
                 print("Worm up OFF")
+            elif mesType is "M5O":
+                utime.sleep_ms(200)
+                uart1.write("IOK")      # init OK! -> M5
+                print("M5wake")
             elif mesType is "XPZ":
                 mes = (uart1.read(5)).decode()
                 #print(mes, end="")
@@ -554,7 +570,7 @@ while True:
                 servoMoveDeg(d, "normal")
         utime.sleep_ms(1)     # servo time lag (receive PWM signal & moving)
         peakHoldCount += 1
-        if peakHoldCount > 15:  # peak hold time = about 1.5sec
+        if peakHoldCount > 30:  # peak hold time = about 3sec
             wMax = weight
             peakHoldCount = 0
             uart1.write(f"WMX {wMax:6.1f}")     # peak reset -> M5
@@ -609,7 +625,7 @@ while True:
             detectSd = 1
             sdMount()
 
-    if numMeas >= 99:
+    if numMeas >= 199:
         print('too many data ---> restart')
         if(detectSd == 1):
             uos.umount('/sd')
